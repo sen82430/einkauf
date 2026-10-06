@@ -220,6 +220,23 @@
   }
   .add input:focus { outline: none; border-color: var(--ink); }
   button.primary { background: var(--ink); color: #ffffff; }
+  .add select {
+    appearance: none;
+    -webkit-appearance: none;
+    font: inherit;
+    width: 100%;
+    min-height: 3.25rem;
+    padding: 0 2.75rem 0 1rem;
+    border: 2px solid var(--line);
+    border-radius: 1rem;
+    background-color: var(--card);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%2356665d' stroke-width='2'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 0.75rem;
+    color: var(--text);
+  }
+  .add select:focus { outline: none; border-color: var(--ink); }
 </style>
 </head>
 <body>
@@ -261,22 +278,24 @@
 <form class="add" id="add" autocomplete="off">
 <input type="text" id="addName" placeholder="Was? z. B. Aubergine" aria-label="Was?" maxlength="60" enterkeyhint="next">
 <input type="text" id="addQty" placeholder="Wie viel? z. B. 2 Stk" aria-label="Wie viel?" maxlength="30" enterkeyhint="done">
+<select id="addCat" aria-label="Kategorie"><option value="">Kategorie wählen</option></select>
 <button type="submit" class="primary">Auf die Liste setzen</button>
 </form>
 </section>
   </main>
   <footer>
     <button type="button" id="reset" hidden>Alle Häkchen entfernen (für alle)</button>
-    <button type="button" id="reload" hidden>Liste neu laden</button>
+    <button type="button" id="purge" hidden>Alle eingepackten Artikel löschen</button>
   </footer>
 </div>
 <script>
 (function(){
   var TOPIC="einkauf-C0rYCgPKos2jGUsJ6S9zVW";
-  var BUILD=1791279263;
+  var BUILD=1791279776;
   var DB="https://einkauf-b36df-default-rtdb.europe-west1.firebasedatabase.app";
   var BASE=DB+"/listen/"+TOPIC;
   var KEY="einkauf-fb-"+TOPIC;
+  var CATS=["🥦 Gemüse & Früchte","🍞 Brot & Backwaren","🥩 Fleisch, Fisch & Veggie","🥛 Milchprodukte & Eier","🍝 Teigwaren, Reis & Getreide","🥫 Konserven & Saucen","🧂 Gewürze & Backen","🍪 Süsses & Snacks","❄️ Tiefkühl","🥤 Getränke","🧴 Haushalt & Körperpflege"];
   var mir={}, outbox=[], es=null, flushing=false, synced=false, lastSig=null;
   var bootV=0,lastCheck=0,lastBeat=0,lastConn=0;
 
@@ -290,10 +309,23 @@
   var main=document.querySelector("main");
   var status=document.getElementById("status"),fill=document.getElementById("fill");
   var live=document.getElementById("live"),resetBtn=document.getElementById("reset");
-  var reloadBtn=document.getElementById("reload");
+  var purgeBtn=document.getElementById("purge");
   var extra=document.getElementById("extra"),extraList=document.getElementById("extraList");
-  var form=document.getElementById("add");
+  var addCard=document.getElementById("addCard"),form=document.getElementById("add");
   var nameIn=document.getElementById("addName"),qtyIn=document.getElementById("addQty");
+  var catIn=document.getElementById("addCat");
+
+  function norm(s){return String(s).toLowerCase().replace(/[^a-zäöü]/g,"");}
+  var NORM=CATS.map(norm);
+  CATS.forEach(function(c,i){
+    var o=document.createElement("option");
+    o.value=String(i);o.textContent=c;catIn.appendChild(o);
+  });
+  [].forEach.call(main.querySelectorAll("section.card"),function(sec){
+    if(sec===extra||sec===addCard)return;
+    var sp=sec.querySelector("h2 span");
+    sec._cat=sp?NORM.indexOf(norm(sp.textContent)):-1;
+  });
 
   function checkUpdate(){
     if(Date.now()-lastCheck<8000)return;
@@ -303,7 +335,7 @@
       return r.text();
     }).then(function(txt){
       var m=/var BUILD=(\d+)/.exec(txt);
-      if(m&&+m[1]>BUILD&&Date.now()-bootV>10000&&!nameIn.value&&!qtyIn.value)reload();
+      if(m&&+m[1]>BUILD&&Date.now()-bootV>10000&&!nameIn.value&&!qtyIn.value&&!catIn.value)reload();
     }).catch(function(){});
   }
 
@@ -318,8 +350,8 @@
   }
 
   document.getElementById("bar").hidden=false;
-  document.getElementById("addCard").hidden=false;
-  live.hidden=false;resetBtn.hidden=false;reloadBtn.hidden=false;
+  addCard.hidden=false;
+  live.hidden=false;resetBtn.hidden=false;purgeBtn.hidden=false;
 
   function setLive(ok){
     live.className="live"+(ok?" on":"");
@@ -340,41 +372,65 @@
     else o[p[i]]=data;
   }
 
+  function cat(g){return typeof g==="number"&&g>=0&&g<CATS.length&&g%1===0?g:-1;}
+
   function apply(S,op){
     if(!op||typeof op.t!=="number")return;
     if(op.k==="c"){
       if(op.t>S.r&&(!S.c[op.i]||op.t>=S.c[op.i].t))S.c[op.i]={v:op.v?1:0,t:op.t};
     }else if(op.k==="a"){
-      S.a[op.i]={n:op.n,q:op.q,t:op.t};
+      S.a[op.i]={n:op.n,q:op.q,g:cat(op.g),t:op.t};
     }else if(op.k==="d"){
       delete S.a[op.i];
+    }else if(op.k==="h"){
+      S.h[op.i]=op.t;
     }else if(op.k==="r"){
       if(op.t>S.r){S.r=op.t;S.c=Object.create(null);}
     }
   }
 
   function view(){
-    var S={c:Object.create(null),a:Object.create(null),r:typeof mir.r==="number"?mir.r:0};
-    var c=obj(mir.c),a=obj(mir.a);
+    var S={c:Object.create(null),a:Object.create(null),h:Object.create(null),r:typeof mir.r==="number"?mir.r:0};
+    var c=obj(mir.c),a=obj(mir.a),h=obj(mir.h);
     Object.keys(c).forEach(function(k){
       var e=c[k];
       if(e&&typeof e.t==="number")S.c[k]={v:e.v?1:0,t:e.t};
     });
     Object.keys(a).forEach(function(k){
       var e=a[k];
-      if(e&&typeof e.n==="string"&&e.n.trim())S.a[k]={n:e.n.slice(0,80),q:typeof e.q==="string"?e.q.slice(0,40):"",t:+e.t||0};
+      if(e&&typeof e.n==="string"&&e.n.trim())S.a[k]={n:e.n.slice(0,80),q:typeof e.q==="string"?e.q.slice(0,40):"",g:cat(e.g),t:+e.t||0};
     });
+    Object.keys(h).forEach(function(k){if(h[k])S.h[k]=h[k];});
     outbox.forEach(function(op){apply(S,op);});
     return S;
+  }
+
+  function listFor(g){
+    if(g<0)return extraList;
+    var kids=main.children,ref=null,i,sec,h2,sp,sm,ul;
+    for(i=0;i<kids.length;i++){
+      sec=kids[i];
+      if(sec===extra||sec===addCard||typeof sec._cat!=="number")continue;
+      if(sec._cat===g)return sec.querySelector("ul");
+      if(!ref&&sec._cat>g)ref=sec;
+    }
+    sec=document.createElement("section");sec.className="card dyn";sec._cat=g;
+    h2=document.createElement("h2");sp=document.createElement("span");sm=document.createElement("small");
+    sp.textContent=CATS[g];sm.setAttribute("data-count","");
+    h2.appendChild(sp);h2.appendChild(sm);
+    ul=document.createElement("ul");
+    sec.appendChild(h2);sec.appendChild(ul);
+    main.insertBefore(sec,ref||extra);
+    return ul;
   }
 
   function render(){
     var S=view();
     var ids=Object.keys(S.a).sort(function(x,y){return S.a[x].t-S.a[y].t||(x<y?-1:1);});
-    var sig=JSON.stringify(ids.map(function(k){return [k,S.a[k].n,S.a[k].q];}));
+    var sig=JSON.stringify(ids.map(function(k){return [k,S.a[k].n,S.a[k].q,S.a[k].g];}));
     if(sig!==lastSig){
       lastSig=sig;
-      extraList.textContent="";
+      [].forEach.call(main.querySelectorAll("li.x,section.dyn"),function(el){el.parentNode.removeChild(el);});
       ids.forEach(function(k){
         var li=document.createElement("li"),lab=document.createElement("label");
         var cb=document.createElement("input"),n=document.createElement("span");
@@ -386,22 +442,27 @@
         del.type="button";del.className="del";del.setAttribute("data-del",k);
         del.textContent="\u00d7";del.setAttribute("aria-label",S.a[k].n+" löschen");
         lab.appendChild(cb);lab.appendChild(n);lab.appendChild(qy);
-        li.appendChild(lab);li.appendChild(del);extraList.appendChild(li);
+        li.appendChild(lab);li.appendChild(del);listFor(S.a[k].g).appendChild(li);
       });
-      extra.hidden=!ids.length;
     }
-    var boxes=[].slice.call(main.querySelectorAll("input[type=checkbox]")),done=0;
-    boxes.forEach(function(b){
-      var st=S.c[b.getAttribute("data-id")];
-      b.checked=!!(st&&st.v);
-    });
+    var total=0,done=0;
     [].forEach.call(main.querySelectorAll("ul"),function(ul){
-      var b=ul.querySelectorAll("input"),c=ul.querySelectorAll("input:checked").length;
-      done+=c;
-      ul.previousElementSibling.querySelector("small").textContent=c+" von "+b.length;
+      var n=0,c=0;
+      [].forEach.call(ul.children,function(li){
+        var b=li.querySelector("input[type=checkbox]");
+        if(!b)return;
+        var id=b.getAttribute("data-id"),st=S.c[id];
+        var hid=!li.classList.contains("x")&&S.h[id]!==undefined;
+        li.hidden=hid;
+        b.checked=!!(st&&st.v);
+        if(!hid){n++;if(b.checked)c++;}
+      });
+      ul.previousElementSibling.querySelector("small").textContent=c+" von "+n;
+      ul.parentNode.hidden=!n;
+      total+=n;done+=c;
     });
-    status.textContent=!boxes.length?"Noch nichts auf der Liste":done===boxes.length?"Alles eingepackt, ab zur Kasse.":done+" von "+boxes.length+" eingepackt";
-    fill.style.width=(boxes.length?done/boxes.length*100:0)+"%";
+    status.textContent=!total?"Liste ist leer":done===total?"Alles eingepackt, ab zur Kasse.":done+" von "+total+" eingepackt";
+    fill.style.width=(total?done/total*100:0)+"%";
   }
 
   function flush(){
@@ -412,19 +473,22 @@
       if((+mir.r||0)>=op.t||(cur&&cur.t>op.t)){outbox.shift();persist();render();flush();return;}
       url+="/c/"+encodeURIComponent(op.i);body={v:op.v?1:0,t:op.t};
     }else if(op.k==="a"){
-      url+="/a/"+encodeURIComponent(op.i);body={n:op.n,q:op.q,t:op.t};
+      url+="/a/"+encodeURIComponent(op.i);body={n:op.n,q:op.q,g:cat(op.g),t:op.t};
     }else if(op.k==="d"){
       url+="/a/"+encodeURIComponent(op.i);method="DELETE";
+    }else if(op.k==="h"){
+      url+="/h/"+encodeURIComponent(op.i);body=op.t;
     }else if(op.k==="r"){
       method="PATCH";body={c:null,r:op.t};
     }else{outbox.shift();persist();flush();return;}
     flushing=true;
-    fetch(url+".json",{method:method,body:body?JSON.stringify(body):undefined}).then(function(r){
+    fetch(url+".json",{method:method,body:body!==null?JSON.stringify(body):undefined}).then(function(r){
       if(!r.ok&&r.status!==400)throw new Error("send");
       if(r.ok){
         if(op.k==="c")setPath("/c/"+op.i,body);
         else if(op.k==="a")setPath("/a/"+op.i,body);
         else if(op.k==="d")setPath("/a/"+op.i,null);
+        else if(op.k==="h")setPath("/h/"+op.i,body);
         else{setPath("/c",null);setPath("/r",op.t);}
       }
       outbox.shift();persist();flushing=false;render();setLive(true);flush();
@@ -496,24 +560,35 @@
     e.preventDefault();
     var n=nameIn.value.trim(),qv=qtyIn.value.trim();
     if(!n){nameIn.focus();return;}
-    send({k:"a",i:"x"+Date.now().toString(36)+Math.random().toString(36).slice(2,8),n:n,q:qv,t:Date.now()});
-    nameIn.value="";qtyIn.value="";nameIn.focus();
+    send({k:"a",i:"x"+Date.now().toString(36)+Math.random().toString(36).slice(2,8),n:n,q:qv,g:catIn.value===""?-1:+catIn.value,t:Date.now()});
+    nameIn.value="";qtyIn.value="";catIn.value="";nameIn.focus();
   });
 
-  var armTimer=null;
-  function disarm(){resetBtn.classList.remove("armed");resetBtn.textContent="Alle Häkchen entfernen (für alle)";}
-  resetBtn.addEventListener("click",function(){
-    if(!resetBtn.classList.contains("armed")){
-      resetBtn.classList.add("armed");
-      resetBtn.textContent="Nochmals tippen zum Entfernen";
-      armTimer=setTimeout(disarm,3000);
-      return;
-    }
-    clearTimeout(armTimer);
+  function arm(btn,idle,ask,act){
+    var timer=null;
+    function disarm(){btn.classList.remove("armed");btn.textContent=idle;}
+    btn.addEventListener("click",function(){
+      if(!btn.classList.contains("armed")){
+        btn.classList.add("armed");btn.textContent=ask;
+        timer=setTimeout(disarm,3000);
+        return;
+      }
+      clearTimeout(timer);
+      act();
+      disarm();
+    });
+  }
+  arm(resetBtn,"Alle Häkchen entfernen (für alle)","Nochmals tippen zum Entfernen",function(){
     send({k:"r",t:Date.now()});
-    disarm();
   });
-  reloadBtn.addEventListener("click",reload);
+  arm(purgeBtn,"Alle eingepackten Artikel löschen","Nochmals tippen zum Löschen",function(){
+    var t=Date.now(),n=0;
+    [].forEach.call(main.querySelectorAll("li:not([hidden]) input[type=checkbox]:checked"),function(b){
+      var li=b.parentNode.parentNode;
+      outbox.push({k:li.classList.contains("x")?"d":"h",i:b.getAttribute("data-id"),t:t});n++;
+    });
+    if(n){persist();render();flush();}
+  });
 
   document.addEventListener("visibilitychange",wake);
   window.addEventListener("online",wake);
