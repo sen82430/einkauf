@@ -182,6 +182,7 @@
     cursor: pointer;
   }
   button.armed { background: var(--ink); color: #ffffff; }
+  button + button { margin-top: 0.75rem; }
   button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -228,81 +229,82 @@
   </main>
   <footer>
     <button type="button" id="reset" hidden>Alle Häkchen entfernen (für alle)</button>
+    <button type="button" id="reload" hidden>Liste neu laden</button>
   </footer>
 </div>
 <script>
 (function(){
   var TOPIC="einkauf-rItXdy4j6qMN0W9VRHRzG6Y4";
+  var BUILD=1791277793;
   var BASE="https://ntfy.sh/"+TOPIC;
   var KEY="einkauf-live-"+TOPIC;
-  var state={}, resetAt=0, outbox=[], es=null, flushing=false;
+  var loc={state:{},resetAt:0}, outbox=[], es=null, flushing=false;
+  var bootV=0,lastCheck=0,lastBeat=0,syncStart=0,lastSeed=0;
 
-  function sig(doc,sc){
-    var m=doc.querySelector("main"),h=doc.querySelector("h1");
-    if(!m||!h||!sc||sc.textContent.indexOf("var TOPIC=")<0)return null;
-    return h.textContent+"\n"+m.innerHTML+"\n"+sc.textContent;
-  }
-  var SIG=sig(document,document.currentScript);
-  var bootV=0,firstCheck=true,noReload=false,lastCheck=0;
   try{
     var q=/[?&]v=(\d+)/.exec(location.search);
     if(q){bootV=+q[1];history.replaceState(null,"",location.pathname+location.hash);}
   }catch(e){}
-  var fromReload=Date.now()-bootV<30000;
+
+  function reload(){location.replace(location.pathname+"?v="+Date.now());}
 
   function checkUpdate(){
-    if(noReload||!SIG||Date.now()-lastCheck<60000)return;
+    if(Date.now()-lastCheck<8000)return;
     lastCheck=Date.now();
     fetch(location.pathname+"?fresh="+Date.now(),{cache:"no-store"}).then(function(r){
       if(!r.ok)throw new Error("fresh");
       return r.text();
     }).then(function(txt){
-      var d=new DOMParser().parseFromString(txt,"text/html"),sc=d.querySelectorAll("script");
-      var s=sig(d,sc[sc.length-1]);
-      var wasFirst=firstCheck;firstCheck=false;
-      if(!s||s===SIG)return;
-      if(wasFirst&&fromReload){noReload=true;return;}
-      location.replace(location.pathname+"?v="+Date.now());
+      var m=/var BUILD=(\d+)/.exec(txt);
+      if(m&&+m[1]>BUILD&&Date.now()-bootV>10000)reload();
     }).catch(function(){});
   }
 
   try{
     var s=JSON.parse(localStorage.getItem(KEY)||"null");
-    if(s){state=s.state||{};resetAt=s.resetAt||0;outbox=s.outbox||[];}
+    if(s){loc.state=s.state||{};loc.resetAt=s.resetAt||0;outbox=s.outbox||[];}
   }catch(e){}
   function persist(){
-    try{localStorage.setItem(KEY,JSON.stringify({state:state,resetAt:resetAt,outbox:outbox}));}catch(e){}
+    try{localStorage.setItem(KEY,JSON.stringify({state:loc.state,resetAt:loc.resetAt,outbox:outbox}));}catch(e){}
   }
 
   var boxes=[].slice.call(document.querySelectorAll("input[type=checkbox]"));
   var status=document.getElementById("status"),fill=document.getElementById("fill");
   var live=document.getElementById("live"),resetBtn=document.getElementById("reset");
+  var reloadBtn=document.getElementById("reload");
   document.getElementById("bar").hidden=false;
-  live.hidden=false;resetBtn.hidden=false;
+  live.hidden=false;resetBtn.hidden=false;reloadBtn.hidden=false;
 
   function setLive(ok){
     live.className="live"+(ok?" on":"");
     live.textContent=ok?"Live verbunden":"Keine Verbindung, wird nachgesendet";
   }
 
-  function apply(ev){
+  function put(S,i,v,t){
+    if(typeof i!=="string"||typeof t!=="number"||t<=S.resetAt)return;
+    var cur=S.state[i];
+    if(!cur||t>=cur.t)S.state[i]={v:v?1:0,t:t};
+  }
+  function wipe(S,t){
+    if(typeof t!=="number"||t<=S.resetAt)return;
+    S.resetAt=t;
+    Object.keys(S.state).forEach(function(k){if(S.state[k].t<=t)delete S.state[k];});
+  }
+  function merge(S,ev){
     if(!ev||typeof ev.t!=="number")return;
-    if(ev.r){
-      if(ev.t>resetAt){
-        resetAt=ev.t;
-        Object.keys(state).forEach(function(k){if(state[k].t<=resetAt)delete state[k];});
-      }
+    if(Array.isArray(ev.s)){
+      wipe(S,ev.z);
+      ev.s.forEach(function(e){if(Array.isArray(e))put(S,e[0],e[1],e[2]);});
       return;
     }
-    if(typeof ev.i!=="string"||ev.t<=resetAt)return;
-    var cur=state[ev.i];
-    if(!cur||ev.t>=cur.t)state[ev.i]={v:ev.v?1:0,t:ev.t};
+    if(ev.r){wipe(S,ev.t);return;}
+    put(S,ev.i,ev.v,ev.t);
   }
 
   function render(){
     var done=0;
     boxes.forEach(function(b){
-      var st=state[b.dataset.id];
+      var st=loc.state[b.dataset.id];
       b.checked=!!(st&&st.v);
     });
     [].forEach.call(document.querySelectorAll("ul"),function(ul){
@@ -324,45 +326,72 @@
   }
 
   function send(ev){
-    apply(ev);outbox.push(ev);persist();render();flush();
+    merge(loc,ev);outbox.push(ev);persist();render();flush();
+  }
+
+  function reseed(srv){
+    var old=Date.now()-3600000,miss=[];
+    if(outbox.length||flushing||Date.now()-lastSeed<60000)return;
+    Object.keys(loc.state).forEach(function(k){
+      var a=loc.state[k],b=srv.state[k];
+      if(a.t<old&&(!b||b.t<a.t))miss.push([k,a.v,a.t]);
+    });
+    if(!miss.length&&!(loc.resetAt>srv.resetAt&&loc.resetAt<old))return;
+    lastSeed=Date.now();
+    do{
+      outbox.push({s:miss.splice(0,30),z:loc.resetAt,t:Date.now()});
+    }while(miss.length);
+    persist();flush();
   }
 
   function sync(){
+    if(Date.now()-syncStart<2000)return;
+    syncStart=Date.now();
     fetch(BASE+"/json?poll=1&since=all").then(function(r){
       if(!r.ok)throw new Error("poll");
       return r.text();
     }).then(function(txt){
+      var srv={state:{},resetAt:0};
       txt.split("\n").forEach(function(line){
         if(!line)return;
         try{
           var m=JSON.parse(line);
-          if(m.event==="message")apply(JSON.parse(m.message));
+          if(m.event==="message"){var ev=JSON.parse(m.message);merge(loc,ev);merge(srv,ev);}
         }catch(e){}
       });
-      outbox.forEach(apply);
+      outbox.forEach(function(ev){merge(loc,ev);});
       persist();render();setLive(true);
+      reseed(srv);
     }).catch(function(){setLive(false);});
   }
+
+  function beat(){lastBeat=Date.now();}
 
   function connect(){
     try{
       if(es)es.close();
+      beat();
       es=new EventSource(BASE+"/sse");
-      es.onopen=function(){setLive(true);sync();flush();};
+      es.onopen=function(){beat();setLive(true);sync();flush();};
       es.onmessage=function(e){
+        beat();
         try{
           var m=JSON.parse(e.data);
-          if(m.event==="message"){apply(JSON.parse(m.message));persist();render();}
+          if(m.event==="message"){merge(loc,JSON.parse(m.message));persist();render();}
         }catch(x){}
       };
+      es.addEventListener("keepalive",beat);
       es.onerror=function(){setLive(false);};
     }catch(e){setLive(false);}
   }
 
+  function watch(){
+    if(!es||es.readyState===2||Date.now()-lastBeat>70000)connect();
+  }
+
   function wake(){
     if(document.hidden)return;
-    if(!es||es.readyState===2)connect();
-    sync();flush();checkUpdate();
+    watch();sync();flush();checkUpdate();
   }
 
   boxes.forEach(function(b){
@@ -384,10 +413,13 @@
     send({r:1,t:Date.now()});
     disarm();
   });
+  reloadBtn.addEventListener("click",reload);
 
   document.addEventListener("visibilitychange",wake);
   window.addEventListener("online",wake);
+  window.addEventListener("pageshow",function(e){if(e.persisted)wake();});
   setInterval(wake,30000);
+  setInterval(function(){if(document.hidden)return;watch();checkUpdate();},15000);
 
   setLive(false);
   render();
