@@ -217,14 +217,15 @@
 </div>
 <script>
 (function(){
-  var TOPIC="einkauf-hAtzRXYpaRkfQJaWrpoH8Dzb";
+  var TOPIC="einkauf-vLbAVUYT9ENsPTGAWpTN2gva";
   var BASE="https://ntfy.sh/"+TOPIC;
   var KEY="einkauf-live-"+TOPIC;
   var state={}, resetAt=0, outbox=[], es=null, flushing=false;
 
   function sig(doc,sc){
     var m=doc.querySelector("main"),h=doc.querySelector("h1");
-    if(!m||!h||!sc||sc.textContent.indexOf("var TOPIC="einkauf-hAtzRXYpaRkfQJaWrpoH8Dzb"\n"+m.innerHTML+"\n"+sc.textContent;
+    if(!m||!h||!sc||sc.textContent.indexOf("var TOPIC=")<0)return null;
+    return h.textContent+"\n"+m.innerHTML+"\n"+sc.textContent;
   }
   var SIG=sig(document,document.currentScript);
   var bootV=0,firstCheck=true,noReload=false,lastCheck=0;
