@@ -237,6 +237,8 @@
     color: var(--text);
   }
   .add select:focus { outline: none; border-color: var(--ink); }
+  li.s { display: flex; align-items: center; }
+  li.s label { flex: 1; min-width: 0; }
 </style>
 </head>
 <body>
@@ -291,7 +293,7 @@
 <script>
 (function(){
   var TOPIC="einkauf-C0rYCgPKos2jGUsJ6S9zVW";
-  var BUILD=1791279776;
+  var BUILD=1791280037;
   var DB="https://einkauf-b36df-default-rtdb.europe-west1.firebasedatabase.app";
   var BASE=DB+"/listen/"+TOPIC;
   var KEY="einkauf-fb-"+TOPIC;
@@ -325,6 +327,14 @@
     if(sec===extra||sec===addCard)return;
     var sp=sec.querySelector("h2 span");
     sec._cat=sp?NORM.indexOf(norm(sp.textContent)):-1;
+    [].forEach.call(sec.querySelectorAll("li"),function(li){
+      var b=li.querySelector("input[type=checkbox]"),n=li.querySelector(".name"),del;
+      if(!b)return;
+      del=document.createElement("button");
+      del.type="button";del.className="del";del.setAttribute("data-hide",b.getAttribute("data-id"));
+      del.textContent="\u00d7";del.setAttribute("aria-label",(n?n.textContent:"Artikel")+" löschen");
+      li.classList.add("s");li.appendChild(del);
+    });
   });
 
   function checkUpdate(){
@@ -547,13 +557,15 @@
 
   main.addEventListener("click",function(e){
     var d=e.target,id=d&&d.getAttribute?d.getAttribute("data-del"):null;
-    if(!id)return;
+    var hid=d&&d.getAttribute?d.getAttribute("data-hide"):null;
+    if(!id&&!hid)return;
     if(!d.classList.contains("armed")){
       d.classList.add("armed");d.textContent="Löschen?";
       setTimeout(function(){d.classList.remove("armed");d.textContent="\u00d7";},3000);
       return;
     }
-    send({k:"d",i:id,t:Date.now()});
+    if(id)send({k:"d",i:id,t:Date.now()});
+    else{d.classList.remove("armed");d.textContent="\u00d7";send({k:"h",i:hid,t:Date.now()});}
   });
 
   form.addEventListener("submit",function(e){
