@@ -246,23 +246,11 @@
   <header>
     <h1>Einkaufsliste</h1>
     <p class="live" id="live" hidden></p>
-    <p class="status" id="status">2 Sachen zum Abhaken</p>
+    <p class="status" id="status">Liste wird geladen</p>
     <div class="bar" id="bar" hidden aria-hidden="true"><span id="fill"></span></div>
   </header>
   <main>
 <!-- LISTE-START -->
-<section class="card">
-<h2><span>🥩 Fleisch, Fisch &amp; Veggie</span><small data-count></small></h2>
-<ul>
-<li><label><input type="checkbox" data-id="chickenwings"><span class="name">Chickenwings</span><span class="qty"></span></label></li>
-</ul>
-</section>
-<section class="card">
-<h2><span>🥫 Konserven &amp; Saucen</span><small data-count></small></h2>
-<ul>
-<li><label><input type="checkbox" data-id="sojasauce"><span class="name">Sojasauce</span><span class="qty"></span></label></li>
-</ul>
-</section>
 <!-- LISTE-ENDE -->
 <section class="card" id="extra" hidden>
 <h2><span>📝 Nachträglich</span><small data-count></small></h2>
@@ -286,7 +274,7 @@
 <script>
 (function(){
   var TOPIC="einkauf-a1CXbhra2qoExjJ8EnbGod";
-  var BUILD=1791280980;
+  var BUILD=1791281210;
   var DB="https://einkauf-b36df-default-rtdb.europe-west1.firebasedatabase.app";
   var BASE=DB+"/listen/"+TOPIC;
   var KEY="einkauf-fb-"+TOPIC;
