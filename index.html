@@ -222,6 +222,35 @@
   var KEY="einkauf-live-"+TOPIC;
   var state={}, resetAt=0, outbox=[], es=null, flushing=false;
 
+  function sig(doc,sc){
+    var m=doc.querySelector("main"),h=doc.querySelector("h1");
+    if(!m||!h||!sc||sc.textContent.indexOf("var TOPIC=")<0)return null;
+    return h.textContent+"\n"+m.innerHTML+"\n"+sc.textContent;
+  }
+  var SIG=sig(document,document.currentScript);
+  var bootV=0,firstCheck=true,noReload=false,lastCheck=0;
+  try{
+    var q=/[?&]v=(\d+)/.exec(location.search);
+    if(q){bootV=+q[1];history.replaceState(null,"",location.pathname+location.hash);}
+  }catch(e){}
+  var fromReload=Date.now()-bootV<30000;
+
+  function checkUpdate(){
+    if(noReload||!SIG||Date.now()-lastCheck<60000)return;
+    lastCheck=Date.now();
+    fetch(location.pathname+"?fresh="+Date.now(),{cache:"no-store"}).then(function(r){
+      if(!r.ok)throw new Error("fresh");
+      return r.text();
+    }).then(function(txt){
+      var d=new DOMParser().parseFromString(txt,"text/html"),sc=d.querySelectorAll("script");
+      var s=sig(d,sc[sc.length-1]);
+      var wasFirst=firstCheck;firstCheck=false;
+      if(!s||s===SIG)return;
+      if(wasFirst&&fromReload){noReload=true;return;}
+      location.replace(location.pathname+"?v="+Date.now());
+    }).catch(function(){});
+  }
+
   try{
     var s=JSON.parse(localStorage.getItem(KEY)||"null");
     if(s){state=s.state||{};resetAt=s.resetAt||0;outbox=s.outbox||[];}
@@ -318,7 +347,7 @@
   function wake(){
     if(document.hidden)return;
     if(!es||es.readyState===2)connect();
-    sync();flush();
+    sync();flush();checkUpdate();
   }
 
   boxes.forEach(function(b){
@@ -348,6 +377,7 @@
   setLive(false);
   render();
   connect();
+  checkUpdate();
 })();
 </script>
 </body>
