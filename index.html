@@ -293,7 +293,7 @@
 <script>
 (function(){
   var TOPIC="einkauf-C0rYCgPKos2jGUsJ6S9zVW";
-  var BUILD=1791280037;
+  var BUILD=1791280654;
   var DB="https://einkauf-b36df-default-rtdb.europe-west1.firebasedatabase.app";
   var BASE=DB+"/listen/"+TOPIC;
   var KEY="einkauf-fb-"+TOPIC;
@@ -393,7 +393,9 @@
     }else if(op.k==="d"){
       delete S.a[op.i];
     }else if(op.k==="h"){
-      S.h[op.i]=op.t;
+      S.h[op.i]=1;
+    }else if(op.k==="u"){
+      delete S.c[op.i];
     }else if(op.k==="r"){
       if(op.t>S.r){S.r=op.t;S.c=Object.create(null);}
     }
@@ -410,7 +412,7 @@
       var e=a[k];
       if(e&&typeof e.n==="string"&&e.n.trim())S.a[k]={n:e.n.slice(0,80),q:typeof e.q==="string"?e.q.slice(0,40):"",g:cat(e.g),t:+e.t||0};
     });
-    Object.keys(h).forEach(function(k){if(h[k])S.h[k]=h[k];});
+    Object.keys(h).forEach(function(k){if(h[k])S.h[k]=1;});
     outbox.forEach(function(op){apply(S,op);});
     return S;
   }
@@ -487,7 +489,9 @@
     }else if(op.k==="d"){
       url+="/a/"+encodeURIComponent(op.i);method="DELETE";
     }else if(op.k==="h"){
-      url+="/h/"+encodeURIComponent(op.i);body=op.t;
+      url+="/h/"+encodeURIComponent(op.i);body=true;
+    }else if(op.k==="u"){
+      url+="/c/"+encodeURIComponent(op.i);method="DELETE";
     }else if(op.k==="r"){
       method="PATCH";body={c:null,r:op.t};
     }else{outbox.shift();persist();flush();return;}
@@ -499,6 +503,7 @@
         else if(op.k==="a")setPath("/a/"+op.i,body);
         else if(op.k==="d")setPath("/a/"+op.i,null);
         else if(op.k==="h")setPath("/h/"+op.i,body);
+        else if(op.k==="u")setPath("/c/"+op.i,null);
         else{setPath("/c",null);setPath("/r",op.t);}
       }
       outbox.shift();persist();flushing=false;render();setLive(true);flush();
@@ -564,8 +569,9 @@
       setTimeout(function(){d.classList.remove("armed");d.textContent="\u00d7";},3000);
       return;
     }
-    if(id)send({k:"d",i:id,t:Date.now()});
-    else{d.classList.remove("armed");d.textContent="\u00d7";send({k:"h",i:hid,t:Date.now()});}
+    if(!id){d.classList.remove("armed");d.textContent="\u00d7";}
+    outbox.push({k:id?"d":"h",i:id||hid,t:Date.now()});
+    send({k:"u",i:id||hid,t:Date.now()});
   });
 
   form.addEventListener("submit",function(e){
@@ -597,7 +603,8 @@
     var t=Date.now(),n=0;
     [].forEach.call(main.querySelectorAll("li:not([hidden]) input[type=checkbox]:checked"),function(b){
       var li=b.parentNode.parentNode;
-      outbox.push({k:li.classList.contains("x")?"d":"h",i:b.getAttribute("data-id"),t:t});n++;
+      outbox.push({k:li.classList.contains("x")?"d":"h",i:b.getAttribute("data-id"),t:t});
+      outbox.push({k:"u",i:b.getAttribute("data-id"),t:t});n++;
     });
     if(n){persist();render();flush();}
   });
