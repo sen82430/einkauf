@@ -188,6 +188,38 @@
   @media (prefers-reduced-motion: reduce) {
     .bar > span, input[type="checkbox"]::after { transition: none; }
   }
+  li.x { display: flex; align-items: center; }
+  li.x label { flex: 1; min-width: 0; }
+  .del {
+    flex: none;
+    width: auto;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    margin-right: 0.5rem;
+    padding: 0 0.75rem;
+    border: 0;
+    border-radius: 0.75rem;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+  .del.armed { font-size: 0.9375rem; }
+  .add { display: grid; gap: 0.75rem; padding: 1rem; }
+  .add input {
+    appearance: none;
+    -webkit-appearance: none;
+    font: inherit;
+    width: 100%;
+    min-height: 3.25rem;
+    padding: 0 1rem;
+    border: 2px solid var(--line);
+    border-radius: 1rem;
+    background: var(--card);
+    color: var(--text);
+  }
+  .add input:focus { outline: none; border-color: var(--ink); }
+  button.primary { background: var(--ink); color: #ffffff; }
 </style>
 </head>
 <body>
@@ -199,6 +231,7 @@
     <div class="bar" id="bar" hidden aria-hidden="true"><span id="fill"></span></div>
   </header>
   <main>
+<!-- LISTE-START -->
 <section class="card">
 <h2><span>🥦 Gemüse &amp; Früchte</span><small data-count></small></h2>
 <ul>
@@ -218,6 +251,19 @@
 <li><label><input type="checkbox" data-id="kaesescheiben"><span class="name">Käsescheiben</span><span class="qty">1 Packung</span></label></li>
 </ul>
 </section>
+<!-- LISTE-ENDE -->
+<section class="card" id="extra" hidden>
+<h2><span>📝 Nachträglich</span><small data-count></small></h2>
+<ul id="extraList"></ul>
+</section>
+<section class="card" id="addCard" hidden>
+<h2><span>➕ Hinzufügen</span></h2>
+<form class="add" id="add" autocomplete="off">
+<input type="text" id="addName" placeholder="Was? z. B. Aubergine" aria-label="Was?" maxlength="60" enterkeyhint="next">
+<input type="text" id="addQty" placeholder="Wie viel? z. B. 2 Stk" aria-label="Wie viel?" maxlength="30" enterkeyhint="done">
+<button type="submit" class="primary">Auf die Liste setzen</button>
+</form>
+</section>
   </main>
   <footer>
     <button type="button" id="reset" hidden>Alle Häkchen entfernen (für alle)</button>
@@ -227,11 +273,12 @@
 <script>
 (function(){
   var TOPIC="einkauf-C0rYCgPKos2jGUsJ6S9zVW";
-  var BUILD=1791278594;
-  var BASE="https://ntfy.sh/"+TOPIC;
-  var KEY="einkauf-live-"+TOPIC;
-  var loc={state:{},resetAt:0}, outbox=[], es=null, flushing=false;
-  var bootV=0,lastCheck=0,lastBeat=0,syncStart=0,lastSeed=0;
+  var BUILD=1791279263;
+  var DB="https://einkauf-b36df-default-rtdb.europe-west1.firebasedatabase.app";
+  var BASE=DB+"/listen/"+TOPIC;
+  var KEY="einkauf-fb-"+TOPIC;
+  var mir={}, outbox=[], es=null, flushing=false, synced=false, lastSig=null;
+  var bootV=0,lastCheck=0,lastBeat=0,lastConn=0;
 
   try{
     var q=/[?&]v=(\d+)/.exec(location.search);
@@ -239,6 +286,14 @@
   }catch(e){}
 
   function reload(){location.replace(location.pathname+"?v="+Date.now());}
+
+  var main=document.querySelector("main");
+  var status=document.getElementById("status"),fill=document.getElementById("fill");
+  var live=document.getElementById("live"),resetBtn=document.getElementById("reset");
+  var reloadBtn=document.getElementById("reload");
+  var extra=document.getElementById("extra"),extraList=document.getElementById("extraList");
+  var form=document.getElementById("add");
+  var nameIn=document.getElementById("addName"),qtyIn=document.getElementById("addQty");
 
   function checkUpdate(){
     if(Date.now()-lastCheck<8000)return;
@@ -248,23 +303,22 @@
       return r.text();
     }).then(function(txt){
       var m=/var BUILD=(\d+)/.exec(txt);
-      if(m&&+m[1]>BUILD&&Date.now()-bootV>10000)reload();
+      if(m&&+m[1]>BUILD&&Date.now()-bootV>10000&&!nameIn.value&&!qtyIn.value)reload();
     }).catch(function(){});
   }
 
+  function obj(x){return x&&typeof x==="object"&&!Array.isArray(x)?x:{};}
+
   try{
     var s=JSON.parse(localStorage.getItem(KEY)||"null");
-    if(s){loc.state=s.state||{};loc.resetAt=s.resetAt||0;outbox=s.outbox||[];}
+    if(s){mir=obj(s.mir);outbox=Array.isArray(s.outbox)?s.outbox:[];}
   }catch(e){}
   function persist(){
-    try{localStorage.setItem(KEY,JSON.stringify({state:loc.state,resetAt:loc.resetAt,outbox:outbox}));}catch(e){}
+    try{localStorage.setItem(KEY,JSON.stringify({mir:mir,outbox:outbox}));}catch(e){}
   }
 
-  var boxes=[].slice.call(document.querySelectorAll("input[type=checkbox]"));
-  var status=document.getElementById("status"),fill=document.getElementById("fill");
-  var live=document.getElementById("live"),resetBtn=document.getElementById("reset");
-  var reloadBtn=document.getElementById("reload");
   document.getElementById("bar").hidden=false;
+  document.getElementById("addCard").hidden=false;
   live.hidden=false;resetBtn.hidden=false;reloadBtn.hidden=false;
 
   function setLive(ok){
@@ -272,108 +326,143 @@
     live.textContent=ok?"Live verbunden":"Keine Verbindung, wird nachgesendet";
   }
 
-  function put(S,i,v,t){
-    if(typeof i!=="string"||typeof t!=="number"||t<=S.resetAt)return;
-    var cur=S.state[i];
-    if(!cur||t>=cur.t)S.state[i]={v:v?1:0,t:t};
-  }
-  function wipe(S,t){
-    if(typeof t!=="number"||t<=S.resetAt)return;
-    S.resetAt=t;
-    Object.keys(S.state).forEach(function(k){if(S.state[k].t<=t)delete S.state[k];});
-  }
-  function merge(S,ev){
-    if(!ev||typeof ev.t!=="number")return;
-    if(Array.isArray(ev.s)){
-      wipe(S,ev.z);
-      ev.s.forEach(function(e){if(Array.isArray(e))put(S,e[0],e[1],e[2]);});
-      return;
+  function setPath(path,data){
+    var p=String(path).split("/").filter(Boolean),o=mir,i;
+    for(i=0;i<p.length;i++){
+      if(p[i]==="__proto__"||p[i]==="constructor"||p[i]==="prototype")return;
     }
-    if(ev.r){wipe(S,ev.t);return;}
-    put(S,ev.i,ev.v,ev.t);
+    if(!p.length){mir=obj(data);return;}
+    for(i=0;i<p.length-1;i++){
+      if(!Object.prototype.hasOwnProperty.call(o,p[i])||!o[p[i]]||typeof o[p[i]]!=="object")o[p[i]]={};
+      o=o[p[i]];
+    }
+    if(data===null||data===undefined)delete o[p[i]];
+    else o[p[i]]=data;
+  }
+
+  function apply(S,op){
+    if(!op||typeof op.t!=="number")return;
+    if(op.k==="c"){
+      if(op.t>S.r&&(!S.c[op.i]||op.t>=S.c[op.i].t))S.c[op.i]={v:op.v?1:0,t:op.t};
+    }else if(op.k==="a"){
+      S.a[op.i]={n:op.n,q:op.q,t:op.t};
+    }else if(op.k==="d"){
+      delete S.a[op.i];
+    }else if(op.k==="r"){
+      if(op.t>S.r){S.r=op.t;S.c=Object.create(null);}
+    }
+  }
+
+  function view(){
+    var S={c:Object.create(null),a:Object.create(null),r:typeof mir.r==="number"?mir.r:0};
+    var c=obj(mir.c),a=obj(mir.a);
+    Object.keys(c).forEach(function(k){
+      var e=c[k];
+      if(e&&typeof e.t==="number")S.c[k]={v:e.v?1:0,t:e.t};
+    });
+    Object.keys(a).forEach(function(k){
+      var e=a[k];
+      if(e&&typeof e.n==="string"&&e.n.trim())S.a[k]={n:e.n.slice(0,80),q:typeof e.q==="string"?e.q.slice(0,40):"",t:+e.t||0};
+    });
+    outbox.forEach(function(op){apply(S,op);});
+    return S;
   }
 
   function render(){
-    var done=0;
+    var S=view();
+    var ids=Object.keys(S.a).sort(function(x,y){return S.a[x].t-S.a[y].t||(x<y?-1:1);});
+    var sig=JSON.stringify(ids.map(function(k){return [k,S.a[k].n,S.a[k].q];}));
+    if(sig!==lastSig){
+      lastSig=sig;
+      extraList.textContent="";
+      ids.forEach(function(k){
+        var li=document.createElement("li"),lab=document.createElement("label");
+        var cb=document.createElement("input"),n=document.createElement("span");
+        var qy=document.createElement("span"),del=document.createElement("button");
+        li.className="x";
+        cb.type="checkbox";cb.setAttribute("data-id",k);
+        n.className="name";n.textContent=S.a[k].n;
+        qy.className="qty";qy.textContent=S.a[k].q;
+        del.type="button";del.className="del";del.setAttribute("data-del",k);
+        del.textContent="\u00d7";del.setAttribute("aria-label",S.a[k].n+" löschen");
+        lab.appendChild(cb);lab.appendChild(n);lab.appendChild(qy);
+        li.appendChild(lab);li.appendChild(del);extraList.appendChild(li);
+      });
+      extra.hidden=!ids.length;
+    }
+    var boxes=[].slice.call(main.querySelectorAll("input[type=checkbox]")),done=0;
     boxes.forEach(function(b){
-      var st=loc.state[b.dataset.id];
+      var st=S.c[b.getAttribute("data-id")];
       b.checked=!!(st&&st.v);
     });
-    [].forEach.call(document.querySelectorAll("ul"),function(ul){
+    [].forEach.call(main.querySelectorAll("ul"),function(ul){
       var b=ul.querySelectorAll("input"),c=ul.querySelectorAll("input:checked").length;
       done+=c;
       ul.previousElementSibling.querySelector("small").textContent=c+" von "+b.length;
     });
-    status.textContent=done===boxes.length?"Alles eingepackt, ab zur Kasse.":done+" von "+boxes.length+" eingepackt";
-    fill.style.width=(done/boxes.length*100)+"%";
+    status.textContent=!boxes.length?"Noch nichts auf der Liste":done===boxes.length?"Alles eingepackt, ab zur Kasse.":done+" von "+boxes.length+" eingepackt";
+    fill.style.width=(boxes.length?done/boxes.length*100:0)+"%";
   }
 
   function flush(){
-    if(flushing||!outbox.length)return;
+    if(flushing||!outbox.length||!synced)return;
+    var op=outbox[0],url=BASE,method="PUT",body=null,cur;
+    if(op.k==="c"){
+      cur=obj(mir.c)[op.i];
+      if((+mir.r||0)>=op.t||(cur&&cur.t>op.t)){outbox.shift();persist();render();flush();return;}
+      url+="/c/"+encodeURIComponent(op.i);body={v:op.v?1:0,t:op.t};
+    }else if(op.k==="a"){
+      url+="/a/"+encodeURIComponent(op.i);body={n:op.n,q:op.q,t:op.t};
+    }else if(op.k==="d"){
+      url+="/a/"+encodeURIComponent(op.i);method="DELETE";
+    }else if(op.k==="r"){
+      method="PATCH";body={c:null,r:op.t};
+    }else{outbox.shift();persist();flush();return;}
     flushing=true;
-    fetch(BASE,{method:"POST",body:JSON.stringify(outbox[0])}).then(function(r){
-      if(!r.ok)throw new Error("send");
-      outbox.shift();persist();flushing=false;flush();
+    fetch(url+".json",{method:method,body:body?JSON.stringify(body):undefined}).then(function(r){
+      if(!r.ok&&r.status!==400)throw new Error("send");
+      if(r.ok){
+        if(op.k==="c")setPath("/c/"+op.i,body);
+        else if(op.k==="a")setPath("/a/"+op.i,body);
+        else if(op.k==="d")setPath("/a/"+op.i,null);
+        else{setPath("/c",null);setPath("/r",op.t);}
+      }
+      outbox.shift();persist();flushing=false;render();setLive(true);flush();
     }).catch(function(){flushing=false;setLive(false);});
   }
 
-  function send(ev){
-    merge(loc,ev);outbox.push(ev);persist();render();flush();
-  }
-
-  function reseed(srv){
-    var old=Date.now()-3600000,miss=[];
-    if(outbox.length||flushing||Date.now()-lastSeed<60000)return;
-    Object.keys(loc.state).forEach(function(k){
-      var a=loc.state[k],b=srv.state[k];
-      if(a.t<old&&(!b||b.t<a.t))miss.push([k,a.v,a.t]);
-    });
-    if(!miss.length&&!(loc.resetAt>srv.resetAt&&loc.resetAt<old))return;
-    lastSeed=Date.now();
-    do{
-      outbox.push({s:miss.splice(0,30),z:loc.resetAt,t:Date.now()});
-    }while(miss.length);
-    persist();flush();
-  }
-
-  function sync(){
-    if(Date.now()-syncStart<2000)return;
-    syncStart=Date.now();
-    fetch(BASE+"/json?poll=1&since=all").then(function(r){
-      if(!r.ok)throw new Error("poll");
-      return r.text();
-    }).then(function(txt){
-      var srv={state:{},resetAt:0};
-      txt.split("\n").forEach(function(line){
-        if(!line)return;
-        try{
-          var m=JSON.parse(line);
-          if(m.event==="message"){var ev=JSON.parse(m.message);merge(loc,ev);merge(srv,ev);}
-        }catch(e){}
-      });
-      outbox.forEach(function(ev){merge(loc,ev);});
-      persist();render();setLive(true);
-      reseed(srv);
-    }).catch(function(){setLive(false);});
+  function send(op){
+    outbox.push(op);persist();render();flush();
   }
 
   function beat(){lastBeat=Date.now();}
 
+  function onData(e,patch){
+    beat();
+    try{
+      var m=JSON.parse(e.data);
+      if(!m||typeof m.path!=="string")return;
+      if(patch){
+        Object.keys(obj(m.data)).forEach(function(k){setPath(m.path+"/"+k,m.data[k]);});
+      }else{
+        setPath(m.path,m.data);
+        if(m.path==="/")synced=true;
+      }
+      persist();render();setLive(true);flush();
+    }catch(x){}
+  }
+
   function connect(){
     try{
       if(es)es.close();
-      beat();
-      es=new EventSource(BASE+"/sse");
-      es.onopen=function(){beat();setLive(true);sync();flush();};
-      es.onmessage=function(e){
-        beat();
-        try{
-          var m=JSON.parse(e.data);
-          if(m.event==="message"){merge(loc,JSON.parse(m.message));persist();render();}
-        }catch(x){}
-      };
-      es.addEventListener("keepalive",beat);
-      es.onerror=function(){setLive(false);};
+      synced=false;lastConn=Date.now();beat();
+      es=new EventSource(BASE+".json");
+      es.onopen=beat;
+      es.addEventListener("put",function(e){onData(e,false);});
+      es.addEventListener("patch",function(e){onData(e,true);});
+      es.addEventListener("keep-alive",beat);
+      es.addEventListener("cancel",function(){synced=false;setLive(false);});
+      es.onerror=function(){synced=false;setLive(false);};
     }catch(e){setLive(false);}
   }
 
@@ -383,13 +472,32 @@
 
   function wake(){
     if(document.hidden)return;
-    watch();sync();flush();checkUpdate();
+    if(Date.now()-lastConn>3000)connect();
+    checkUpdate();
   }
 
-  boxes.forEach(function(b){
-    b.addEventListener("change",function(){
-      send({i:b.dataset.id,v:b.checked?1:0,t:Date.now()});
-    });
+  main.addEventListener("change",function(e){
+    var b=e.target;
+    if(b&&b.type==="checkbox")send({k:"c",i:b.getAttribute("data-id"),v:b.checked?1:0,t:Date.now()});
+  });
+
+  main.addEventListener("click",function(e){
+    var d=e.target,id=d&&d.getAttribute?d.getAttribute("data-del"):null;
+    if(!id)return;
+    if(!d.classList.contains("armed")){
+      d.classList.add("armed");d.textContent="Löschen?";
+      setTimeout(function(){d.classList.remove("armed");d.textContent="\u00d7";},3000);
+      return;
+    }
+    send({k:"d",i:id,t:Date.now()});
+  });
+
+  form.addEventListener("submit",function(e){
+    e.preventDefault();
+    var n=nameIn.value.trim(),qv=qtyIn.value.trim();
+    if(!n){nameIn.focus();return;}
+    send({k:"a",i:"x"+Date.now().toString(36)+Math.random().toString(36).slice(2,8),n:n,q:qv,t:Date.now()});
+    nameIn.value="";qtyIn.value="";nameIn.focus();
   });
 
   var armTimer=null;
@@ -402,7 +510,7 @@
       return;
     }
     clearTimeout(armTimer);
-    send({r:1,t:Date.now()});
+    send({k:"r",t:Date.now()});
     disarm();
   });
   reloadBtn.addEventListener("click",reload);
@@ -410,8 +518,7 @@
   document.addEventListener("visibilitychange",wake);
   window.addEventListener("online",wake);
   window.addEventListener("pageshow",function(e){if(e.persisted)wake();});
-  setInterval(wake,30000);
-  setInterval(function(){if(document.hidden)return;watch();checkUpdate();},15000);
+  setInterval(function(){if(document.hidden)return;watch();flush();checkUpdate();},15000);
 
   setLive(false);
   render();
