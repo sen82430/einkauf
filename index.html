@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f8ee">
+<title>Einkaufsliste</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f8ee;
+    --card: #ffffff;
+    --ink: #17794a;
+    --ink-soft: #e6f5ec;
+    --text: #16241c;
+    --muted: #56665d;
+    --line: #e3eadd;
+    --done: #93a199;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); background: var(--bg); }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 1.1875rem;
+    line-height: 1.3;
+    -webkit-text-size-adjust: 100%;
+  }
+  [hidden] { display: none !important; }
+
+  .sheet { max-width: 34rem; margin: 0 auto; }
+
+  header {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 2;
+    background: var(--bg);
+    padding: 0.875rem 1rem 0.75rem;
+  }
+  h1 {
+    margin: 0;
+    font-size: 1.625rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .live {
+    float: right;
+    margin: 0.25rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--muted);
+  }
+  .live::before {
+    content: "";
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: #c9a227;
+    margin-right: 0.375rem;
+  }
+  .live.on::before { background: var(--ink); }
+  .status {
+    margin: 0.125rem 0 0.5rem;
+    color: var(--ink);
+    font-weight: 700;
+    font-size: 1rem;
+  }
+  .bar {
+    height: 0.625rem;
+    background: #dfe8d6;
+    border-radius: 1rem;
+    overflow: hidden;
+  }
+  .bar > span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--ink);
+    border-radius: 1rem;
+    transition: width 0.25s ease;
+  }
+
+  main { padding: 0.25rem 0.75rem 1rem; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 1rem;
+    margin-top: 0.875rem;
+    overflow: hidden;
+  }
+  h2 {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    font-size: 1.0625rem;
+    font-weight: 800;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--ink-soft);
+    color: var(--ink);
+  }
+  h2 small {
+    font-weight: 700;
+    font-size: 0.875rem;
+    background: var(--card);
+    border-radius: 1rem;
+    padding: 0.125rem 0.625rem;
+  }
+
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { border-top: 1px solid var(--line); }
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    min-height: 3.75rem;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  label:active { background: var(--ink-soft); }
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    flex: none;
+    width: 2rem;
+    height: 2rem;
+    margin: 0;
+    border: 2.5px solid var(--ink);
+    border-radius: 50%;
+    background: var(--card);
+    display: grid;
+    place-content: center;
+    cursor: pointer;
+  }
+  input[type="checkbox"]::after {
+    content: "";
+    width: 0.5rem;
+    height: 0.95rem;
+    border: solid #ffffff;
+    border-width: 0 0.1875rem 0.1875rem 0;
+    transform: rotate(45deg) scale(0);
+    margin-top: -0.2rem;
+    transition: transform 0.12s ease;
+  }
+  input[type="checkbox"]:checked { background: var(--ink); }
+  input[type="checkbox"]:checked::after { transform: rotate(45deg) scale(1); }
+  input[type="checkbox"]:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+  .name { flex: 1; font-weight: 600; }
+  .qty {
+    flex: none;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--muted);
+    background: var(--bg);
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.5rem;
+  }
+  .qty:empty { display: none; }
+  input:checked ~ .name { color: var(--done); text-decoration: line-through; font-weight: 500; }
+  input:checked ~ .qty { color: var(--done); background: transparent; }
+  li:has(input:checked) { background: #f7faf4; }
+
+  footer { padding: 0.25rem 0.75rem 2rem; }
+  button {
+    font: inherit;
+    font-weight: 700;
+    width: 100%;
+    min-height: 3.25rem;
+    border: 2px solid var(--ink);
+    border-radius: 1rem;
+    background: var(--card);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  button.armed { background: var(--ink); color: #ffffff; }
+  button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bar > span, input[type="checkbox"]::after { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header>
+    <h1>Einkaufsliste</h1>
+    <p class="live" id="live" hidden></p>
+    <p class="status" id="status">3 Sachen zum Abhaken</p>
+    <div class="bar" id="bar" hidden aria-hidden="true"><span id="fill"></span></div>
+  </header>
+  <main>
+<section class="card">
+<h2><span>🥦 Gemüse &amp; Früchte</span><small data-count></small></h2>
+<ul>
+<li><label><input type="checkbox" data-id="rueebli"><span class="name">Rüebli</span><span class="qty"></span></label></li>
+</ul>
+</section>
+<section class="card">
+<h2><span>🍝 Teigwaren, Reis &amp; Getreide</span><small data-count></small></h2>
+<ul>
+<li><label><input type="checkbox" data-id="teigwaren"><span class="name">Teigwaren</span><span class="qty"></span></label></li>
+</ul>
+</section>
+<section class="card">
+<h2><span>🍪 Süsses &amp; Snacks</span><small data-count></small></h2>
+<ul>
+<li><label><input type="checkbox" data-id="kekse"><span class="name">Kekse</span><span class="qty"></span></label></li>
+</ul>
+</section>
+  </main>
+  <footer>
+    <button type="button" id="reset" hidden>Alle Häkchen entfernen (für alle)</button>
+  </footer>
+</div>
+<script>
+(function(){
+  var TOPIC="einkauf-P9tJEJh2MuI7AlIVkAhnok";
+  var BASE="https://ntfy.sh/"+TOPIC;
+  var KEY="einkauf-live-"+TOPIC;
+  var state={}, resetAt=0, outbox=[], es=null, flushing=false;
+
+  try{
+    var s=JSON.parse(localStorage.getItem(KEY)||"null");
+    if(s){state=s.state||{};resetAt=s.resetAt||0;outbox=s.outbox||[];}
+  }catch(e){}
+  function persist(){
+    try{localStorage.setItem(KEY,JSON.stringify({state:state,resetAt:resetAt,outbox:outbox}));}catch(e){}
+  }
+
+  var boxes=[].slice.call(document.querySelectorAll("input[type=checkbox]"));
+  var status=document.getElementById("status"),fill=document.getElementById("fill");
+  var live=document.getElementById("live"),resetBtn=document.getElementById("reset");
+  document.getElementById("bar").hidden=false;
+  live.hidden=false;resetBtn.hidden=false;
+
+  function setLive(ok){
+    live.className="live"+(ok?" on":"");
+    live.textContent=ok?"Live verbunden":"Keine Verbindung, wird nachgesendet";
+  }
+
+  function apply(ev){
+    if(!ev||typeof ev.t!=="number")return;
+    if(ev.r){
+      if(ev.t>resetAt){
+        resetAt=ev.t;
+        Object.keys(state).forEach(function(k){if(state[k].t<=resetAt)delete state[k];});
+      }
+      return;
+    }
+    if(typeof ev.i!=="string"||ev.t<=resetAt)return;
+    var cur=state[ev.i];
+    if(!cur||ev.t>=cur.t)state[ev.i]={v:ev.v?1:0,t:ev.t};
+  }
+
+  function render(){
+    var done=0;
+    boxes.forEach(function(b){
+      var st=state[b.dataset.id];
+      b.checked=!!(st&&st.v);
+    });
+    [].forEach.call(document.querySelectorAll("ul"),function(ul){
+      var b=ul.querySelectorAll("input"),c=ul.querySelectorAll("input:checked").length;
+      done+=c;
+      ul.previousElementSibling.querySelector("small").textContent=c+" von "+b.length;
+    });
+    status.textContent=done===boxes.length?"Alles eingepackt, ab zur Kasse.":done+" von "+boxes.length+" eingepackt";
+    fill.style.width=(done/boxes.length*100)+"%";
+  }
+
+  function flush(){
+    if(flushing||!outbox.length)return;
+    flushing=true;
+    fetch(BASE,{method:"POST",body:JSON.stringify(outbox[0])}).then(function(r){
+      if(!r.ok)throw new Error("send");
+      outbox.shift();persist();flushing=false;flush();
+    }).catch(function(){flushing=false;setLive(false);});
+  }
+
+  function send(ev){
+    apply(ev);outbox.push(ev);persist();render();flush();
+  }
+
+  function sync(){
+    fetch(BASE+"/json?poll=1&since=all").then(function(r){
+      if(!r.ok)throw new Error("poll");
+      return r.text();
+    }).then(function(txt){
+      txt.split("\n").forEach(function(line){
+        if(!line)return;
+        try{
+          var m=JSON.parse(line);
+          if(m.event==="message")apply(JSON.parse(m.message));
+        }catch(e){}
+      });
+      outbox.forEach(apply);
+      persist();render();setLive(true);
+    }).catch(function(){setLive(false);});
+  }
+
+  function connect(){
+    try{
+      if(es)es.close();
+      es=new EventSource(BASE+"/sse");
+      es.onopen=function(){setLive(true);sync();flush();};
+      es.onmessage=function(e){
+        try{
+          var m=JSON.parse(e.data);
+          if(m.event==="message"){apply(JSON.parse(m.message));persist();render();}
+        }catch(x){}
+      };
+      es.onerror=function(){setLive(false);};
+    }catch(e){setLive(false);}
+  }
+
+  function wake(){
+    if(document.hidden)return;
+    if(!es||es.readyState===2)connect();
+    sync();flush();
+  }
+
+  boxes.forEach(function(b){
+    b.addEventListener("change",function(){
+      send({i:b.dataset.id,v:b.checked?1:0,t:Date.now()});
+    });
+  });
+
+  var armTimer=null;
+  function disarm(){resetBtn.classList.remove("armed");resetBtn.textContent="Alle Häkchen entfernen (für alle)";}
+  resetBtn.addEventListener("click",function(){
+    if(!resetBtn.classList.contains("armed")){
+      resetBtn.classList.add("armed");
+      resetBtn.textContent="Nochmals tippen zum Entfernen";
+      armTimer=setTimeout(disarm,3000);
+      return;
+    }
+    clearTimeout(armTimer);
+    send({r:1,t:Date.now()});
+    disarm();
+  });
+
+  document.addEventListener("visibilitychange",wake);
+  window.addEventListener("online",wake);
+  setInterval(wake,30000);
+
+  setLive(false);
+  render();
+  connect();
+})();
+</script>
+</body>
+</html>
