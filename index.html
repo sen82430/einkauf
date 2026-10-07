@@ -237,6 +237,16 @@
     color: var(--text);
   }
   .add select:focus { outline: none; border-color: var(--ink); }
+  .voice { padding-bottom: 0; }
+  .heard { margin: 0; font-size: 0.9375rem; color: var(--muted); }
+  #pv:empty { display: none; }
+  .pv { display: grid; gap: 0.5rem; padding: 0.75rem 0; border-top: 1px solid var(--line); }
+  .pv input, .pv select { min-height: 2.75rem; font-size: 1rem; padding-left: 0.75rem; }
+  .pr { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
+  .pv .del { margin-right: 0; }
+  .pvb { display: grid; gap: 0.75rem; }
+  .pvb button + button { margin-top: 0; }
+  .add select.ask { border-color: #c9a227; }
   li.s { display: flex; align-items: center; }
   li.s label { flex: 1; min-width: 0; }
 </style>
@@ -258,6 +268,15 @@
 </section>
 <section class="card" id="addCard" hidden>
 <h2><span>➕ Hinzufügen</span></h2>
+<div class="add voice" id="voice" hidden>
+<button type="button" id="mic">🎤 Artikel diktieren</button>
+<p class="heard" id="heard" aria-live="polite"></p>
+<div id="pv"></div>
+<div class="pvb" id="pvBtns" hidden>
+<button type="button" class="primary" id="pvOk"></button>
+<button type="button" id="pvNo">Verwerfen</button>
+</div>
+</div>
 <form class="add" id="add" autocomplete="off">
 <input type="text" id="addName" placeholder="Was? z. B. Aubergine" aria-label="Was?" maxlength="60" enterkeyhint="next">
 <input type="text" id="addQty" placeholder="Wie viel? z. B. 2 Stk" aria-label="Wie viel?" maxlength="30" enterkeyhint="done">
@@ -269,12 +288,13 @@
   <footer>
     <button type="button" id="reset" hidden>Alle Häkchen entfernen (für alle)</button>
     <button type="button" id="purge" hidden>Alle eingepackten Artikel löschen</button>
+    <button type="button" id="clear" hidden>Liste leeren</button>
   </footer>
 </div>
 <script>
 (function(){
   var TOPIC="einkauf-a1CXbhra2qoExjJ8EnbGod";
-  var BUILD=1791281606;
+  var BUILD=1791353935;
   var DB="https://einkauf-b36df-default-rtdb.europe-west1.firebasedatabase.app";
   var BASE=DB+"/listen/"+TOPIC;
   var KEY="einkauf-fb-"+TOPIC;
@@ -293,10 +313,16 @@
   var status=document.getElementById("status"),fill=document.getElementById("fill");
   var live=document.getElementById("live"),resetBtn=document.getElementById("reset");
   var purgeBtn=document.getElementById("purge");
+  var clearBtn=document.getElementById("clear");
   var extra=document.getElementById("extra"),extraList=document.getElementById("extraList");
   var addCard=document.getElementById("addCard"),form=document.getElementById("add");
   var nameIn=document.getElementById("addName"),qtyIn=document.getElementById("addQty");
   var catIn=document.getElementById("addCat");
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  var voice=document.getElementById("voice"),micBtn=document.getElementById("mic");
+  var heard=document.getElementById("heard"),pv=document.getElementById("pv");
+  var pvBtns=document.getElementById("pvBtns"),pvOk=document.getElementById("pvOk"),pvNo=document.getElementById("pvNo");
+  var rec=null,listening=false,recLang="de-CH";
 
   function norm(s){return String(s).toLowerCase().replace(/[^a-zäöü]/g,"");}
   var NORM=CATS.map(norm);
@@ -325,8 +351,8 @@
       if(!r.ok)throw new Error("fresh");
       return r.text();
     }).then(function(txt){
-      var m=/var BUILD=(\d+)/.exec(txt);
-      if(m&&+m[1]>BUILD&&Date.now()-bootV>10000&&!nameIn.value&&!qtyIn.value&&!catIn.value)reload();
+      var m=/var BUILD=1791353935(\d+)/.exec(txt);
+      if(m&&+m[1]>BUILD&&Date.now()-bootV>10000&&!nameIn.value&&!qtyIn.value&&!catIn.value&&!listening&&!pv.children.length)reload();
     }).catch(function(){});
   }
 
@@ -342,7 +368,7 @@
 
   document.getElementById("bar").hidden=false;
   addCard.hidden=false;
-  live.hidden=false;resetBtn.hidden=false;purgeBtn.hidden=false;
+  live.hidden=false;resetBtn.hidden=false;purgeBtn.hidden=false;clearBtn.hidden=false;
 
   function setLive(ok){
     live.className="live"+(ok?" on":"");
@@ -379,6 +405,9 @@
       delete S.c[op.i];
     }else if(op.k==="r"){
       if(op.t>S.r){S.r=op.t;S.c=Object.create(null);}
+    }else if(op.k==="e"){
+      S.a=Object.create(null);S.c=Object.create(null);
+      if(op.t>S.r)S.r=op.t;
     }
   }
 
@@ -475,6 +504,8 @@
       url+="/c/"+encodeURIComponent(op.i);method="DELETE";
     }else if(op.k==="r"){
       method="PATCH";body={c:null,r:op.t};
+    }else if(op.k==="e"){
+      method="PATCH";body={a:null,c:null,r:op.t};
     }else{outbox.shift();persist();flush();return;}
     flushing=true;
     fetch(url+".json",{method:method,body:body!==null?JSON.stringify(body):undefined}).then(function(r){
@@ -485,6 +516,7 @@
         else if(op.k==="d")setPath("/a/"+op.i,null);
         else if(op.k==="h")setPath("/h/"+op.i,body);
         else if(op.k==="u")setPath("/c/"+op.i,null);
+        else if(op.k==="e"){setPath("/a",null);setPath("/c",null);setPath("/r",op.t);}
         else{setPath("/c",null);setPath("/r",op.t);}
       }
       outbox.shift();persist();flushing=false;render();setLive(true);flush();
@@ -563,6 +595,441 @@
     nameIn.value="";qtyIn.value="";catIn.value="";nameIn.focus();
   });
 
+  var MIC="\ud83c\udfa4 Artikel diktieren";
+  var HINT="Sag z. B.: Äpfel, 2 Liter Milch, Vanillezucker. Es hört zu, bis du stoppst.";
+  var KW={"gemüse":0,"früchte":0,"obst":0,
+    "backwaren":1,"bäckerei":1,"brotwaren":1,
+    "metzgerei":2,
+    "milchprodukte":3,"milchprodukt":3,"molkerei":3,
+    "teigwaren":4,"getreide":4,
+    "konserven":5,"konserve":5,"saucen":5,
+    "gewürze":6,"backzutaten":6,
+    "süsses":7,"snacks":7,"süssigkeiten":7,
+    "tiefkühl":8,"tiefkühler":8,"tiefkühlkost":8,"tiefkühlprodukte":8,
+    "getränke":9,
+    "haushalt":10,"körperpflege":10,"drogerie":10,"hygiene":10};
+  var WEAKKW={"fleisch":2,"fisch":2,"veggie":2,"milch":3,"eier":3,"pasta":4,"reis":4,"backen":6,"brot":1,"snack":7,"getränk":9};
+  var PHR=[[/gemüse\s*(und|&)\s*früchte/gi,"Gemüse"],[/brot\s*(und|&)\s*backwaren/gi,"Backwaren"],
+    [/fleisch,?\s*fisch\s*(und|&)\s*veggie/gi,"Metzgerei"],[/milchprodukte\s*(und|&)\s*eier/gi,"Milchprodukte"],
+    [/teigwaren,?\s*reis\s*(und|&)\s*getreide/gi,"Teigwaren"],[/konserven\s*(und|&)\s*saucen/gi,"Konserven"],
+    [/gewürze\s*(und|&)\s*backen/gi,"Gewürze"],[/sü(ss|ß)es\s*(und|&)\s*snacks/gi,"Snacks"],
+    [/haushalt\s*(und|&)\s*körperpflege/gi,"Haushalt"]];
+  var UNITS={"stück":"Stk","stücke":"Stk","stücken":"Stk","stk":"Stk",
+    "kilo":"kg","kilos":"kg","kilogramm":"kg","kg":"kg","gramm":"g","g":"g","gr":"g",
+    "liter":"l","l":"l","deziliter":"dl","dl":"dl","zentiliter":"cl","cl":"cl","milliliter":"ml","ml":"ml",
+    "packung":"Pack","packungen":"Pack","pack":"Pack","päckli":"Pack","päckchen":"Pack","paket":"Pack","pakete":"Pack",
+    "flasche":"Fl.","flaschen":"Fl.","dose":"Dose","dosen":"Dosen","büchse":"Dose","büchsen":"Dosen","bund":"Bund",
+    "glas":"Glas","gläser":"Gläser","becher":"Becher","beutel":"Beutel","tube":"Tube","tuben":"Tuben",
+    "sack":"Sack","netz":"Netz","scheibe":"Scheibe","scheiben":"Scheiben","tafel":"Tafel","tafeln":"Tafeln",
+    "rolle":"Rolle","rollen":"Rollen","kiste":"Kiste","kisten":"Kisten","schale":"Schale","schalen":"Schalen"};
+  var NUMS={"ein":1,"eine":1,"einen":1,"einem":1,"eins":1,"zwei":2,"drei":3,"vier":4,"fünf":5,"sechs":6,
+    "sieben":7,"acht":8,"neun":9,"zehn":10,"elf":11,"zwölf":12};
+  var HALF={"halb":"\u00bd","halbes":"\u00bd","halbe":"\u00bd","halben":"\u00bd","anderthalb":"1.5","eineinhalb":"1.5"};
+  var SEP={"und":1,"dann":1,"danach":1,"sowie":1,"plus":1,"komma":1,"ausserdem":1,"außerdem":1,"punkt":1};
+  var FILL={"bitte":1,"äh":1,"ähm":1,"noch":1,"mal":1,"x":1};
+  var CATW={"kategorie":1,"rubrik":1,"abteilung":1};
+
+  /* Wörterbuch: Rubrik, Gewicht, Wörter. Gewicht 1 = Rohware oder Geschmack,
+     2 = Produktart, 3 = geht fast immer vor (Tiefkühl). */
+  var DICT=[
+   [0,1,"apfel äpfel birne birnen banane bananen orange orangen mandarine mandarinen clementine clementinen zitrone zitronen limette limetten grapefruit traube trauben weintrauben erdbeere erdbeeren erdbeer himbeere himbeeren himbeer heidelbeere heidelbeeren heidelbeer brombeere brombeeren johannisbeeren beeren kirsche kirschen kirsch zwetschge zwetschgen pflaume pflaumen aprikose aprikosen pfirsich pfirsiche nektarine nektarinen melone melonen wassermelone mango mangos ananas kiwi kiwis avocado avocados feige feigen granatapfel kaki papaya rhabarber früchte obst"],
+   [0,1,"tomate tomaten cherrytomaten gurke gurken salatgurke rüebli rübli rüben karotte karotten möhre möhren kartoffel kartoffeln süsskartoffel süsskartoffeln zwiebel zwiebeln schalotte schalotten knoblauch lauch frühlingszwiebel frühlingszwiebeln peperoni zucchetti zucchini aubergine auberginen brokkoli broccoli blumenkohl kohl rosenkohl rotkohl weisskohl wirz wirsing kabis chinakohl kohlrabi spinat salat kopfsalat eisbergsalat nüsslisalat nüssler feldsalat rucola lattich endivie chicorée fenchel sellerie stangensellerie knollensellerie kürbis randen rande radieschen rettich spargel spargeln pilz pilze champignon champignons bohne bohnen kefen maiskolben ingwer chili chilis peperoncini krautstiel mangold pakchoi sprossen kresse gemüse"],
+   [1,2,"brot brötchen brötli semmel weggli gipfeli croissant croissants zopf butterzopf toast toastbrot baguette ciabatta knäckebrot laugenbrötchen bürli pita fladenbrot tortilla tortillas wrap wraps bagel bagels kuchen torte tortenboden muffin muffins berliner donut donuts brezel bretzel silserli zwieback brownie brownies cake nussgipfel gipfel"],
+   [2,2,"fleisch hackfleisch gehacktes poulet pouletbrust huhn hähnchen hühnchen truthahn trute pute rind rinds rindfleisch schwein schweins schweinefleisch kalb kalbs kalbfleisch lamm steak entrecôte entrecote filet schnitzel plätzli geschnetzeltes ragout braten kotelett koteletts speck schinken salami wurst würste würstchen würstli bratwurst cervelat wienerli landjäger aufschnitt trockenfleisch bündnerfleisch fleischkäse leberkäse burger hamburger fisch lachs rauchlachs forelle dorsch kabeljau pangasius zander egli crevetten garnelen shrimps muscheln tofu vegi veggie quorn falafel tempeh seitan brust schenkel flügeli gyros kebab cordonbleu fleischbällchen hackbällchen mostbröckli chorizo lyoner"],
+   [3,2,"milch vollmilch magermilch buttermilch hafermilch mandelmilch sojamilch haferdrink milchdrink joghurt jogurt yoghurt naturjoghurt quark rahm sahne schlagrahm schlagsahne halbrahm vollrahm kaffeerahm sauerrahm cremefraiche butter margarine käse parmesan mozzarella feta gruyere greyerzer emmentaler appenzeller tilsiter raclette raclettekäse fondue reibkäse frischkäse hüttenkäse mascarpone ricotta gorgonzola camembert brie halloumi burrata cheddar philadelphia skyr kefir ei eier pudding blätterteig kuchenteig pizzateig teig spätzliteig ziger tomme vanillecreme"],
+   [4,2,"teigwaren pasta nudeln spaghetti penne fusilli farfalle tagliatelle lasagne lasagneblätter makkaroni hörnli rigatoni linguine tortellini ravioli gnocchi spätzli knöpfli reis risotto risottoreis basmati basmatireis jasminreis couscous bulgur quinoa polenta maisgriess griess haferflocken flocken müesli müsli cornflakes cerealien granola linsen hirse gerste ebly glasnudeln reisnudeln ramen kartoffelstock"],
+   [5,2,"passata pelati tomatenpüree tomatenmark tomatensauce sauce sugo pesto ketchup mayonnaise mayo senf sojasauce öl olivenöl rapsöl sonnenblumenöl essig balsamico aceto thon thunfisch sardinen sardellen mais kichererbsen kidneybohnen oliven kapern essiggurken cornichons sauerkraut rotkraut apfelmus mus kompott konfitüre marmelade gomfi honig nutella erdnussbutter aufstrich hummus kokosmilch kondensmilch suppe fond salsa tabasco sriracha currypaste paste dressing salatsauce püree ahornsirup artischocken tomatengehackt gehacktetomaten geschältetomaten tomatengeschält dosentomaten rösti schokocreme haselnusscreme weissebohnen"],
+   [6,2,"salz pfeffer gewürz gewürze paprikapulver currypulver muskat muskatnuss kräutersalz aromat bouillon brühe mehl weissmehl zucker puderzucker rohzucker vanillezucker vanillzucker backpulver natron hefe trockenhefe maizena stärke speisestärke gelatine kakao kakaopulver couverture kuvertüre schokostreusel streusel paniermehl kokosraspel backaroma aroma puddingpulver pulver kümmel nelken safran kurkuma chiliflocken knoblauchpulver cayenne sesam mohn leinsamen chiasamen gemahlenemandeln mandelngemahlen kokosflocken"],
+   [6,1,"oregano basilikum thymian rosmarin petersilie peterli schnittlauch koriander dill minze salbei lorbeer kräuter vanille vanill zimt curry paprika"],
+   [7,2,"schoggi kekse keks guetzli guetsli biskuit biscuits cookies chips pommeschips nüsse erdnüsse erdnüssli mandeln haselnüsse walnüsse baumnüsse cashew cashews pistazien nussmischung studentenfutter rosinen datteln trockenfrüchte dörrfrüchte gummibärchen gummibärli bonbons bonbon täfeli kaugummi riegel schokoriegel müesliriegel popcorn salzstangen salzstängeli crackers cracker waffeln reiswaffeln lebkuchen pralinen haribo snickers twix toblerone pringles smarties flips kerne sonnenblumenkerne kürbiskerne"],
+   [7,1,"schokolade schoko nuss haselnuss kokos caramel karamell mokka"],
+   [8,3,"tiefkühl tk tiefgekühlt gefroren glace glacé eis eiscreme wassereis cornet pizza pommes pommesfrites frites fischstäbchen rahmspinat tiefkühlgemüse tiefkühlerbsen tiefkühlbeeren eiswürfel kroketten nuggets frühlingsrollen"],
+   [8,2,"erbsen edamame"],
+   [9,2,"wasser mineralwasser mineral sprudel saft orangensaft apfelsaft multivitaminsaft most süssmost schorle apfelschorle cola cocacola coke pepsi fanta sprite rivella eistee icetea tee schwarztee grüntee teebeutel kaffee kaffeebohnen kaffeekapseln kapseln nespresso espresso bier wein rotwein weisswein schaumwein prosecco sekt champagner aperol gin vodka wodka whisky rum likör schnaps sirup limonade limo energydrink redbull drink smoothie shake protein whey wheyprotein proteinpulver proteinshake ovomaltine ovo tonic gingerale kombucha valser henniez evian kaffeepulver energy"],
+   [10,2,"toilettenpapier wcpapier klopapier haushaltpapier haushaltspapier küchenpapier küchenrolle papier taschentücher nastücher servietten alufolie folie frischhaltefolie backpapier abfallsäcke kehrichtsäcke müllsäcke säcke gebührensäcke züribags waschmittel waschpulver weichspüler spülmittel abwaschmittel geschirrspültabs tabs reiniger putzmittel entkalker schwamm schwämme lappen putzlappen bürste shampoo duschgel duschmittel conditioner spülung seife handseife flüssigseife zahnpasta zahnpaste zahncreme zahnbürste zahnbürsten zahnseide mundspülung mundwasser deo deodorant rasierer rasierklingen klingen rasierschaum rasiergel creme handcreme sonnencreme bodylotion lotion watte wattestäbchen wattepads pflaster windeln feuchttücher tücher tampons binden slipeinlagen kondome kerzen streichhölzer feuerzeug batterien glühbirne glühbirnen katzenfutter hundefutter katzenstreu futter haargel haarspray mittel sonnenmilch körpermilch babyöl körperöl rasierwasser gesichtswasser gefrierbeutel staubsaugerbeutel abfallbeutel filter kaffeefilter spray kontaktlinsen"]
+  ];
+  var EXACT={"ei":1,"rum":1,"gin":1,"tk":1,"ovo":1,"tee":0};
+  var ENDS=["n","en","e","s","er","es","li"];
+  var LEX={},KEYS=[];
+  DICT.forEach(function(d){
+    d[2].split(" ").forEach(function(k){
+      if(!k||has(LEX,k))return;
+      LEX[k]={k:k,g:d[0],w:d[1]};KEYS.push(k);
+    });
+  });
+  KEYS.sort(function(a,b){return b.length-a.length;});
+
+  function list(s){var o={};s.split(" ").forEach(function(k){o[k]=1;});return o;}
+  /* Geschmack oder Zusatz vor einer Produktart: «Vanill Zucker», «Erdbeer Joghurt». */
+  var STEM=list("vanill vanille erdbeer himbeer heidelbeer kirsch schoko kokos mokka caramel karamell haselnuss nuss kräuter curry zimt");
+  var HEAD=list("saft sauce mus püree suppe chips kuchen konfitüre marmelade sirup tee essig öl zucker joghurt jogurt glace eis pulver paste creme schorle likör bonbons riegel drink shake smoothie müesli müsli kekse guetzli torte quark pudding salz butter pesto schokolade");
+  /* Produkte, hinter denen ein Geschmack steht: «Joghurt Erdbeer», «Protein Vanille». */
+  var TAKES=list("joghurt jogurt naturjoghurt glace eis protein whey wheyprotein proteinpulver proteinshake pudding müesli müsli drink shake quark tee sirup riegel kekse guetzli cornflakes skyr smoothie konfitüre schokolade");
+  var FLAV=list("vanill vanille erdbeer erdbeere erdbeeren himbeer himbeere himbeeren heidelbeer heidelbeeren kirsch kirsche schoko schokolade kokos mokka caramel karamell haselnuss nuss zitrone banane mango pfirsich aprikose zimt");
+  var CUT=list("brust schenkel flügeli filet schnitzel plätzli geschnetzeltes ragout braten kotelett koteletts hackfleisch gehacktes steak");
+  var ANIMAL=list("poulet huhn hähnchen hühnchen truthahn trute pute rind rinds schwein schweins kalb kalbs lamm lachs fisch");
+  /* Doppelwörter, die zusammengehören, obwohl der erste Teil auch allein ein Artikel wäre. */
+  var SPANOK=list("wheyprotein erdnussbutter pommeschips pommesfrites zahnpasta zahnpaste zahnbürste zahnbürsten zahnseide zahncreme vanillzucker vanillezucker weissebohnen tomatengehackt gehacktetomaten geschältetomaten tomatengeschält gemahlenemandeln mandelngemahlen olivenöl kokosmilch kokosraspel kokosflocken cocacola redbull cremefraiche wcpapier");
+  var MOD=list("gehackt geschält passiert gerieben geraspelt geschnitten gemahlen geräuchert getrocknet gesalzen ungesalzen laktosefrei glutenfrei vegan vegetarisch fettarm light zero natur nature frisch ganz gross klein rot grün gelb weiss schwarz dunkel hell mild scharf süss sauer classic original pur extra tiefgekühlt gefroren tiefkühl tk");
+  var LEAD=list("tiefkühl tk tiefgekühlte tiefgekühlter gefrorene gefrorener");
+  var TOP=list("salami margherita prosciutto hawaii funghi tonno schinken mozzarella");
+  var GLUE=list("mit ohne für aus vom à la de di del");
+  var PRE=list("bio frische frischer frisches grosse grosser kleine kleiner rote roter grüne gelbe weisse weisser schwarze schwarzer dunkle helle ganze gemahlene geriebene geriebener gehackte geschälte getrocknete geräucherte geräucherter laktosefreie glutenfreie vegane fettarme neue süsse saure scharfe milde");
+
+  function has(o,k){return Object.prototype.hasOwnProperty.call(o,k);}
+  function ends(s,e){return s.length>=e.length&&s.slice(s.length-e.length)===e;}
+  function norm(s){
+    return String(s).toLowerCase().replace(/ß/g,"ss").replace(/[éèêë]/g,"e").replace(/[àâ]/g,"a")
+      .replace(/ç/g,"c").replace(/[îï]/g,"i").replace(/ô/g,"o").replace(/û/g,"u").replace(/[^a-zäöü0-9]/g,"");
+  }
+
+  /* Sucht ein Wort im Wörterbuch: genau, in der Mehrzahl oder als Ende eines
+     zusammengesetzten Wortes (das letzte Glied bestimmt die Rubrik). */
+  function look(w){
+    var i,j,k,r;
+    if(!w)return null;
+    if(has(LEX,w))return LEX[w];
+    for(i=0;i<KEYS.length;i++){
+      k=KEYS[i];
+      if(k.length>=w.length||EXACT[k]===1)continue;
+      if(k.length<3&&k!=="öl")continue;
+      r=w.length-k.length;
+      if(ends(w,k)&&r>=3)return LEX[k];
+      if(k.length>3){
+        for(j=0;j<ENDS.length;j++){
+          if(ends(w,k+ENDS[j])&&(r===ENDS[j].length||r-ENDS[j].length>=3))return LEX[k];
+        }
+      }
+    }
+    return null;
+  }
+  function lookPre(w){
+    var i,k;
+    for(i=0;i<KEYS.length;i++){
+      k=KEYS[i];
+      if(k.length>=4&&w.length-k.length>=3&&w.indexOf(k)===0)return LEX[k];
+    }
+    return null;
+  }
+
+  /* Bilden zwei gesprochene Wörter zusammen ein bekanntes Wort? */
+  function span(a,b){
+    var sp=look(a+b);
+    if(!sp||sp.k.length<=b.length)return null;
+    if(has(SPANOK,sp.k))return sp;
+    return look(a)?null:sp;
+  }
+
+  function guess(name){
+    var ws=String(name).split(/\s+/).map(norm).filter(Boolean),best=null,i,h,j;
+    function take(h,wt,pos){
+      if(!h)return;
+      if(!best||wt>best.wt||(wt===best.wt&&(h.k.length>best.len||(h.k.length===best.len&&pos>=best.pos))))
+        best={g:h.g,wt:wt,len:h.k.length,pos:pos};
+    }
+    if(!ws.length)return -1;
+    for(i=0;i<ws.length;i++){
+      if(/tiefkühl|tiefgekühlt|gefroren/.test(ws[i])||ws[i]==="tk")return 8;
+    }
+    for(i=0;i<ws.length;i++){
+      h=look(ws[i]);
+      take(h,h?h.w:0,i);
+      if(i<ws.length-1){
+        j=span(ws[i],ws[i+1]);
+        if(j)take(j,j.w+2,i+1);
+      }
+    }
+    if(!best){
+      for(i=ws.length-1;i>=0&&!best;i--)take(lookPre(ws[i]),1,i);
+    }
+    return best?best.g:-1;
+  }
+
+  /* Gehört das neue Wort noch zum laufenden Artikel? */
+  function joins(words,t){
+    var p=norm(words[words.length-1]),n=norm(t),hp,hn,i;
+    if(!n||!p)return true;
+    if(has(MOD,n)||has(GLUE,n)||has(GLUE,p)||has(PRE,p)||has(LEAD,p))return true;
+    if(span(p,n))return true;
+    hp=look(p);hn=look(n);
+    if(!hn)return true;
+    if(!hp){
+      for(i=0;i<words.length-1;i++){if(look(norm(words[i])))return false;}
+      return true;
+    }
+    if(has(STEM,p)&&has(HEAD,hn.k))return true;
+    if(has(TAKES,hp.k)&&has(FLAV,n))return true;
+    if(has(ANIMAL,hp.k)&&has(CUT,hn.k))return true;
+    if(hp.k==="pizza"&&has(TOP,n))return true;
+    return false;
+  }
+
+  /* Beginnt mit diesem und dem nächsten Wort ein bekanntes Doppelwort («WC Papier»)? */
+  function opens(t,next){
+    var a=norm(t),b=norm(next||"");
+    return !!a&&!!b&&!!span(a,b);
+  }
+
+  function tok(raw){
+    raw=raw||"";
+    return {t:raw.replace(/^[-\u2013\u2014"'(]+|[-\u2013\u2014"'),;.!?:]+$/g,""),b:/[,;.!?]$/.test(raw)};
+  }
+  function unitOf(x){
+    x=String(x||"").toLowerCase().replace(/\.$/,"");
+    return has(UNITS,x)?UNITS[x]:null;
+  }
+  function isNum(t){
+    var w=t.toLowerCase(),m=/^\d+(?:[.,]\d+)?([a-zäöü]*)$/i.exec(t);
+    if(m)return !m[1]||m[1].toLowerCase()==="x"||!!unitOf(m[1]);
+    return has(NUMS,w)||has(HALF,w);
+  }
+
+  function parse(text){
+    var out=[],cur,last=null,toks,i,k,w,m,num,u,nx,brk,q,bare,before=null,force=false,nk;
+    text=String(text);
+    PHR.forEach(function(p){text=text.replace(p[0],p[1]);});
+    toks=text.split(/\s+/);
+    function fresh(){cur={n:[],q:"",g:-1,qa:false};}
+    function push(open){
+      var it=null,p;
+      if(cur.n.length){
+        it={n:cur.n.join(" ").slice(0,60),q:cur.q.slice(0,30),g:cur.g};
+        it.n=it.n.charAt(0).toUpperCase()+it.n.slice(1);
+        if(it.g<0)it.g=guess(it.n);else it.s=1;
+        out.push(it);
+      }else if(cur.q&&out.length){
+        p=out[out.length-1];
+        if(!p.q)p.q=cur.q.slice(0,30);
+      }
+      last=open&&it&&!it.s?it:null;
+      fresh();
+    }
+    /* Was folgt nach Position j: ein Artikelname oder etwas anderes? */
+    function nameNext(j){
+      var x,lw;
+      for(;j<toks.length;j++){
+        x=tok(toks[j]);
+        if(!x.t){if(x.b)return false;continue;}
+        lw=x.t.toLowerCase();
+        if(has(FILL,lw))continue;
+        return !(has(SEP,lw)||has(KW,lw)||has(CATW,lw)||isNum(x.t));
+      }
+      return false;
+    }
+    function setCat(g){
+      if(cur.n.length){cur.g=g;push(false);return true;}
+      if(!cur.q&&last&&(last.g<0||last.g===g)){last.g=g;last.s=1;last=null;return true;}
+      if(!cur.q&&force&&out.length){out[out.length-1].g=g;out[out.length-1].s=1;return true;}
+      return false;
+    }
+    fresh();
+    for(i=0;i<toks.length;i++){
+      k=tok(toks[i]);brk=k.b;
+      if(!k.t){if(brk)push(true);continue;}
+      w=k.t.toLowerCase();
+      if(has(SEP,w)){push(false);force=false;continue;}
+      if(has(FILL,w))continue;
+      if(has(CATW,w)){force=true;continue;}
+      num=null;q=null;bare=false;
+      m=/^(\d+(?:[.,]\d+)?)([a-zäöü]*)$/i.exec(k.t);
+      if(m&&m[2]){
+        u=unitOf(m[2]);
+        if(u)q=m[1]+" "+u;
+        else if(m[2].toLowerCase()==="x")num=m[1];
+      }else if(m){
+        num=m[1];
+      }else if(has(NUMS,w)){
+        nx=tok(toks[i+1]);
+        if(has(HALF,nx.t.toLowerCase())){num=HALF[nx.t.toLowerCase()];i++;brk=nx.b;}
+        else num=String(NUMS[w]);
+      }else if(has(HALF,w)){
+        num=HALF[w];
+      }
+      if(num!==null){
+        nx=tok(toks[i+1]);u=brk?null:unitOf(nx.t);
+        if(u){i++;brk=nx.b;q=num+" "+u;}
+        else{q=num;bare=true;}
+      }
+      if(q!==null){
+        if(!bare&&before===null)before=!cur.n.length;
+        if(!cur.n.length){cur.q=q;cur.qa=false;}
+        else if(cur.q){push(false);cur.q=q;}
+        else{
+          nk=!brk&&nameNext(i+1);
+          if(nk&&(bare||before)){push(false);cur.q=q;}
+          else{cur.q=q;cur.qa=true;}
+        }
+        force=false;
+        if(brk)push(true);
+        continue;
+      }
+      if(KW[w]===8&&has(KW,w)&&cur.n.length&&!brk&&nameNext(i+1)){push(false);cur.n.push(k.t);continue;}
+      if(has(KW,w)&&setCat(KW[w])){force=false;continue;}
+      if(force&&has(WEAKKW,w)&&setCat(WEAKKW[w])){force=false;continue;}
+      force=false;last=null;
+      if(cur.n.length){
+        if(cur.qa)push(false);
+        else if(has(PRE,norm(k.t))&&!has(PRE,norm(cur.n[cur.n.length-1])))push(false);
+        else if(!has(MOD,norm(k.t))&&opens(k.t,tok(toks[i+1]).t))push(false);
+        else if(!joins(cur.n,k.t))push(false);
+      }
+      cur.n.push(k.t);
+      if(brk)push(true);
+    }
+    push(false);
+    return out;
+  }
+
+  function setHeard(t){heard.textContent=t;}
+  function shown(t){return String(t).replace(/\s*;\s*/g,", ").trim();}
+  function pvSync(){
+    var n=pv.children.length;
+    pvBtns.hidden=!n;
+    pvOk.textContent=(n===1?"1 Artikel":n+" Artikel")+" auf die Liste setzen";
+  }
+  function addRow(it){
+    var row=document.createElement("div"),n=document.createElement("input");
+    var pr=document.createElement("div"),qy=document.createElement("input");
+    var sel=document.createElement("select"),del=document.createElement("button"),o;
+    row.className="pv";pr.className="pr";
+    n.type="text";n.maxLength=60;n.value=it.n;n.setAttribute("aria-label","Artikel");
+    qy.type="text";qy.maxLength=30;qy.value=it.q;qy.placeholder="Menge";qy.setAttribute("aria-label","Menge");
+    sel.setAttribute("aria-label","Kategorie");
+    o=document.createElement("option");o.value="";o.textContent="Kategorie wählen";sel.appendChild(o);
+    CATS.forEach(function(c,i){
+      var x=document.createElement("option");
+      x.value=String(i);x.textContent=c;sel.appendChild(x);
+    });
+    sel.value=it.g<0?"":String(it.g);
+    if(it.g<0)sel.classList.add("ask");
+    sel.addEventListener("change",function(){sel.classList.toggle("ask",sel.value==="");});
+    del.type="button";del.className="del";del.setAttribute("data-pv","1");
+    del.textContent="×";del.setAttribute("aria-label","Aus der Vorschau entfernen");
+    pr.appendChild(qy);pr.appendChild(sel);pr.appendChild(del);
+    row.appendChild(n);row.appendChild(pr);pv.appendChild(row);
+  }
+  function pvClear(){
+    while(pv.firstChild)pv.removeChild(pv.firstChild);
+    pvSync();
+  }
+
+  /* Diktat: läuft, bis der Knopf nochmals getippt wird. Beendet der Browser die
+     Erkennung nach einer Pause von selbst, wird sie sofort neu gestartet. */
+  var base="",quick=0,stopTimer=null,lastErr="";
+
+  function micIdle(){
+    micBtn.classList.remove("armed");micBtn.textContent=MIC;
+  }
+  function finish(){
+    var txt=base.trim(),items,open=0;
+    if(stopTimer){clearTimeout(stopTimer);stopTimer=null;}
+    listening=false;rec=null;base="";quick=0;
+    micIdle();
+    items=txt?parse(txt):[];
+    if(items.length){
+      items.forEach(function(it){if(it.g<0)open++;addRow(it);});
+      pvSync();
+      setHeard("Gehört: "+shown(txt)+". Bitte prüfen"+(open?", bei "+open+" fehlt die Kategorie":"")+".");
+    }else if(txt){
+      setHeard("Nicht verstanden: "+shown(txt));
+    }else if(lastErr==="not-allowed"||lastErr==="service-not-allowed"){
+      setHeard("Mikrofon ist gesperrt. Bitte im Browser für diese Seite erlauben.");
+    }else if(lastErr==="audio-capture"){
+      setHeard("Kein Mikrofon gefunden.");
+    }else if(lastErr==="network"){
+      setHeard("Spracherkennung nicht erreichbar, bitte Internet prüfen.");
+    }else{
+      setHeard(pv.children.length?"Nichts Neues gehört.":"Nichts gehört. Nochmals tippen und sprechen.");
+    }
+  }
+
+  function startRec(){
+    var r,sess="",inter="",err="",got=false,t0=Date.now(),ended=false;
+    try{r=new SR();}catch(e){lastErr="";finish();setHeard("Spracheingabe ist hier nicht verfügbar.");return;}
+    rec=r;
+    r.lang=recLang;r.interimResults=true;r.continuous=true;r.maxAlternatives=1;
+    r.onresult=function(e){
+      var parts=[],a="",i,tr,j,lc;
+      for(i=0;i<e.results.length;i++){
+        tr=String(e.results[i][0].transcript||"").trim();
+        if(!tr)continue;
+        if(!e.results[i].isFinal){a+=" "+tr;continue;}
+        /* Manche Handys liefern jedes Ergebnis mit dem ganzen bisherigen Text. */
+        lc=tr.toLowerCase();j=parts.join(" ").toLowerCase();
+        if(j&&lc.indexOf(j)===0)parts=[tr];
+        else if(parts.length&&lc.indexOf(parts[parts.length-1].toLowerCase())===0)parts[parts.length-1]=tr;
+        else parts.push(tr);
+      }
+      got=true;quick=0;
+      sess=parts.join(" ; ");inter=a.trim();
+      setHeard("Gehört: "+shown([base,sess,inter].filter(Boolean).join(" ; ")));
+    };
+    r.onerror=function(e){err=(e&&e.error)||"error";};
+    r.onend=function(){
+      var add=[sess,inter].filter(Boolean).join(" ; "),fatal;
+      if(ended||rec!==r)return;
+      ended=true;
+      if(add)base=base?base+" ; "+add:add;
+      lastErr=err;
+      if(err==="language-not-supported"&&recLang!=="de-DE"){recLang="de-DE";err="";}
+      fatal=err==="not-allowed"||err==="service-not-allowed"||err==="audio-capture"||err==="language-not-supported";
+      if(!got&&Date.now()-t0<1500)quick++;
+      if(listening&&!fatal&&!document.hidden&&quick<4){startRec();return;}
+      finish();
+    };
+    try{r.start();}
+    catch(e){lastErr="";finish();if(!pv.children.length)setHeard("Spracheingabe konnte nicht starten.");}
+  }
+
+  function micStart(){
+    base="";quick=0;lastErr="";listening=true;
+    micBtn.classList.add("armed");micBtn.textContent="⏹ Stopp und Vorschau zeigen";
+    setHeard("Ich höre zu, bis du auf Stopp tippst …");
+    startRec();
+  }
+  function micStop(){
+    if(!listening)return;
+    listening=false;
+    micBtn.textContent="Einen Moment …";
+    try{if(rec)rec.stop();else finish();}catch(e){finish();}
+    /* Falls der Browser das Ende nicht meldet. */
+    stopTimer=setTimeout(function(){
+      var r=rec;stopTimer=null;
+      if(!r)return;
+      try{r.onend();}catch(e){finish();}
+    },2000);
+  }
+
+  if(SR){
+    voice.hidden=false;setHeard(HINT);
+    micBtn.addEventListener("click",function(){
+      if(listening)micStop();
+      else if(!rec)micStart();
+    });
+    document.addEventListener("visibilitychange",function(){if(document.hidden&&listening)micStop();});
+    pv.addEventListener("click",function(e){
+      var d=e.target;
+      if(!d||!d.getAttribute||!d.getAttribute("data-pv"))return;
+      pv.removeChild(d.parentNode.parentNode);
+      pvSync();
+      if(!pv.children.length)setHeard(HINT);
+    });
+    pvOk.addEventListener("click",function(){
+      var t=Date.now(),n=0;
+      [].forEach.call(pv.children,function(row){
+        var name=row.querySelector("input").value.trim();
+        var qv=row.querySelector(".pr input").value.trim(),g=row.querySelector("select").value;
+        if(!name)return;
+        outbox.push({k:"a",i:"x"+t.toString(36)+n+Math.random().toString(36).slice(2,8),n:name,q:qv,g:g===""?-1:+g,t:t+n});
+        n++;
+      });
+      pvClear();
+      if(n){persist();render();flush();}
+      setHeard(n?(n===1?"1 Artikel":n+" Artikel")+" hinzugefügt.":HINT);
+    });
+    pvNo.addEventListener("click",function(){pvClear();setHeard(HINT);});
+  }
+
   function arm(btn,idle,ask,act){
     var timer=null;
     function disarm(){btn.classList.remove("armed");btn.textContent=idle;}
@@ -588,6 +1055,14 @@
       outbox.push({k:"u",i:b.getAttribute("data-id"),t:t});n++;
     });
     if(n){persist();render();flush();}
+  });
+
+  arm(clearBtn,"Liste leeren","Nochmals tippen: ganze Liste leeren",function(){
+    var t=Date.now();
+    [].forEach.call(main.querySelectorAll("li.s:not([hidden]) input[type=checkbox]"),function(b){
+      outbox.push({k:"h",i:b.getAttribute("data-id"),t:t});
+    });
+    send({k:"e",t:t});
   });
 
   document.addEventListener("visibilitychange",wake);
